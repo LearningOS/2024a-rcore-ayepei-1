@@ -171,3 +171,17 @@ pub fn translated_byte_buffer(token: usize, ptr: *const u8, len: usize) -> Vec<&
     }
     v
 }
+
+///在内核态中将虚拟地址转化为物理地址再将时间存入
+pub fn pa_get_time(token:usize,ti:*const u8){
+
+    let mut page_table = PageTable::from_token(token);
+    
+    let start = ti as usize;
+    let start_va = VirtAddr::from(start);
+    let vpn = start_va.floor();
+    page_table.find_pte_create(vpn).unwrap();
+
+}
+
+

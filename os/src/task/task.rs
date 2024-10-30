@@ -96,6 +96,15 @@ impl TaskControlBlock {
             None
         }
     }
+
+    ///mmap匿名映射
+    pub fn change_mmap(&mut self,start: usize, len: usize, port: usize)->isize{
+        self.memory_set.mmap(start,len,port)
+    }
+    ///解除mmap匿名映射
+    pub fn change_munmmap(&mut self,start: usize, len: usize)->isize{
+        self.memory_set.munmmap(start,len)
+    }
 }
 
 #[derive(Copy, Clone, PartialEq)]

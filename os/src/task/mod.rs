@@ -14,6 +14,8 @@ mod switch;
 #[allow(clippy::module_inception)]
 mod task;
 
+use crate::timer::get_time_ms;
+use crate::config::{MAX_APP_NUM,MAX_SYSCALL_NUM};
 use crate::loader::{get_app_data, get_num_app};
 use crate::sync::UPSafeCell;
 use crate::trap::TrapContext;
@@ -46,6 +48,12 @@ struct TaskManagerInner {
     tasks: Vec<TaskControlBlock>,
     /// id of current `Running` task
     current_task: usize,
+
+    //运行时间
+    run_time:[usize;MAX_APP_NUM],
+
+    //调用次数
+    syscall_times:[[u32;MAX_SYSCALL_NUM]; MAX_APP_NUM],
 }
 
 lazy_static! {
@@ -58,12 +66,16 @@ lazy_static! {
         for i in 0..num_app {
             tasks.push(TaskControlBlock::new(get_app_data(i), i));
         }
+        let run_time=[0;MAX_APP_NUM];
+        let syscall_times=[[0;MAX_SYSCALL_NUM]; MAX_APP_NUM];
         TaskManager {
             num_app,
             inner: unsafe {
                 UPSafeCell::new(TaskManagerInner {
                     tasks,
                     current_task: 0,
+                    run_time,
+                    syscall_times,
                 })
             },
         }
@@ -132,7 +144,19 @@ impl TaskManager {
         let cur = inner.current_task;
         inner.tasks[cur].change_program_brk(size)
     }
-
+    
+    ///mmap 匿名映射
+    pub fn get_to_mmap(&self,start: usize, len: usize, port: usize)->isize{
+        let mut inner = self.inner.exclusive_access();
+        let cur = inner.current_task;
+        inner.tasks[cur].change_mmap(start,len,port)
+    }
+    ///解除mmap 匿名映射
+    pub fn get_to_munmap(&self,start: usize,len: usize)->isize{
+        let mut inner = self.inner.exclusive_access();
+        let cur = inner.current_task;
+        inner.tasks[cur].change_munmmap(start,len) 
+    }
     /// Switch current `Running` task to the task we have found,
     /// or there is no `Ready` task and we can exit with all applications completed
     fn run_next_task(&self) {
@@ -140,6 +164,9 @@ impl TaskManager {
             let mut inner = self.inner.exclusive_access();
             let current = inner.current_task;
             inner.tasks[next].task_status = TaskStatus::Running;
+            if inner.run_time[next]==0{
+                inner.run_time[next]=get_time_ms();
+            }
             inner.current_task = next;
             let current_task_cx_ptr = &mut inner.tasks[current].task_cx as *mut TaskContext;
             let next_task_cx_ptr = &inner.tasks[next].task_cx as *const TaskContext;
@@ -152,6 +179,24 @@ impl TaskManager {
         } else {
             panic!("All applications completed!");
         }
+    }
+
+    fn get_now(&self)-> usize{
+        let inner = self.inner.exclusive_access();
+        inner.run_time[inner.current_task]
+    }
+
+    fn update_syscall_time(&self,syscall_id:usize){
+        let mut inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        inner.syscall_times[current][syscall_id]+=1;
+    }
+
+    fn get_count(&self)-> [u32; MAX_SYSCALL_NUM]{
+        let inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        inner.syscall_times[current]
+
     }
 }
 
@@ -202,3 +247,28 @@ pub fn current_trap_cx() -> &'static mut TrapContext {
 pub fn change_program_brk(size: i32) -> Option<usize> {
     TASK_MANAGER.change_current_program_brk(size)
 }
+
+
+///获得当前任务的开始时间
+pub fn get_now()->usize{
+    TASK_MANAGER.get_now()
+}
+///更改系统调用次数
+pub fn update_syscall_time(syscall_id:usize){
+    TASK_MANAGER.update_syscall_time(syscall_id);
+}
+///获得系统调用次数
+pub fn get_count()->[u32; MAX_SYSCALL_NUM]{
+    TASK_MANAGER.get_count()
+}
+
+
+///创建mmap匿名映射
+pub fn get_mmap(start: usize, len: usize, port: usize)->isize{
+    TASK_MANAGER.get_to_mmap(start,len,port)
+}
+
+///解除mmap匿名映射
+ pub fn get_munmap(start: usize,len: usize)->isize{
+    TASK_MANAGER.get_to_munmap(start,len)
+ }
