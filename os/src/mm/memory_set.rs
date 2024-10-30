@@ -67,9 +67,9 @@ impl MemorySet {
     #[allow(unused)]
     pub fn mmap(&mut self,start: usize, len: usize, port: usize)->isize{
         let sstart=VirtAddr::from(start).floor();
-        let eend=VirtAddr::from(start+len-len%PAGE_SIZE).ceil();
+        let eend=VirtAddr::from(start+len+((PAGE_SIZE-len)%PAGE_SIZE)).ceil();
         for area in self.areas.iter(){
-            if sstart<= area.vpn_range.get_start()&&eend>=area.vpn_range.get_end() || sstart>= area.vpn_range.get_start()&&sstart<area.vpn_range.get_end() || eend>= area.vpn_range.get_start()&&eend<=area.vpn_range.get_end(){
+            if sstart<= area.vpn_range.get_start()&&eend>=area.vpn_range.get_end() || sstart>= area.vpn_range.get_start()&&sstart<area.vpn_range.get_end() || eend> area.vpn_range.get_start()&&eend<=area.vpn_range.get_end(){
                 return -1;
             }
         }
@@ -84,7 +84,7 @@ impl MemorySet {
             permission=MapPermission::X|permission;
         }
         self.push(
-            MapArea::new(start.into(), (start+len-len%PAGE_SIZE).into(), MapType::Framed, permission),
+            MapArea::new(start.into(), (start+len+((PAGE_SIZE-len)%PAGE_SIZE)).into(), MapType::Framed, permission),
             None,
         );
 
@@ -94,7 +94,7 @@ impl MemorySet {
     #[allow(unused)]
     pub fn munmmap(&mut self,start: usize, len: usize)->isize{
         let sstart=VirtAddr::from(start).floor();
-        let eend=VirtAddr::from(start+len).ceil();
+        let eend=VirtAddr::from(start+len+((PAGE_SIZE-len)%PAGE_SIZE)).ceil();
         let mut flag=0;
         for area in self.areas.iter(){
             if sstart>= area.vpn_range.get_start()&&eend<=area.vpn_range.get_end(){
@@ -105,12 +105,11 @@ impl MemorySet {
         if flag==0{
             return -1;
         }
-        let mut b=MapArea::new(start.into(), (start+len-len%PAGE_SIZE).into(), MapType::Framed, MapPermission::U);
-        // b.unmap(&mut self.page_table);
+        let mut b=MapArea::new(start.into(), (start+len+((PAGE_SIZE-len)%PAGE_SIZE)).into(), MapType::Framed, MapPermission::U);
+        b.unmap(&mut self.page_table);
         if let Some(index) = self.areas.iter().position(|x| x.vpn_range ==b.vpn_range) {
             self.areas.swap_remove(index); 
         }
-        //进行取消
         0
     }
     fn push(&mut self, mut map_area: MapArea, data: Option<&[u8]>) {

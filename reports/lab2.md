@@ -1,6 +1,6 @@
 实现的功能：
 sys_get_time和sys_task_info通过采用translated_byte_buffer建立虚拟地址到物理地址的映射，并将数据拷贝到物理地址上。
-mmap建立虚拟地址到物理地址的映射，并将虚拟地址的范围加到areas并且更新pagetable。munmap从areas中将原来映射的取消掉。
+mmap建立虚拟地址到物理地址的映射，并将虚拟地址的范围加到areas并且更新pagetable。munmap从areas中将原来映射的取消掉,并将对应的页表项释放掉。
 
 问答题：
 
