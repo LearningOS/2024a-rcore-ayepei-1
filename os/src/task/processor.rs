@@ -7,7 +7,9 @@
 use super::__switch;
 use super::{fetch_task, TaskStatus};
 use super::{TaskContext, TaskControlBlock};
+use crate::config::{ BIG_STRIDE, MAX_APP_NUM, MAX_SYSCALL_NUM};
 use crate::sync::UPSafeCell;
+use crate::timer::get_time_ms;
 use crate::trap::TrapContext;
 use alloc::sync::Arc;
 use lazy_static::*;
@@ -19,14 +21,24 @@ pub struct Processor {
 
     ///The basic control flow of each core, helping to select and switch process
     idle_task_cx: TaskContext,
+
+    //运行时间
+    run_time:[usize;MAX_APP_NUM],
+
+    //调用次数
+    syscall_times:[[u32;MAX_SYSCALL_NUM]; MAX_APP_NUM],
 }
 
 impl Processor {
     ///Create an empty Processor
     pub fn new() -> Self {
+        let run_time=[0;MAX_APP_NUM];
+        let syscall_times=[[0;MAX_SYSCALL_NUM]; MAX_APP_NUM];
         Self {
             current: None,
             idle_task_cx: TaskContext::zero_init(),
+            run_time,
+            syscall_times,
         }
     }
 
@@ -44,6 +56,21 @@ impl Processor {
     pub fn current(&self) -> Option<Arc<TaskControlBlock>> {
         self.current.as_ref().map(Arc::clone)
     }
+
+    ///Get current run_time
+    fn get_now(&self)-> usize{
+        self.run_time[self.current().unwrap().pid.0]
+    }
+
+    ///Get current count
+    fn get_count(&self)-> [u32; MAX_SYSCALL_NUM]{
+        self.syscall_times[self.current().unwrap().pid.0]
+    }
+    ///update
+    fn update_syscall_time(&mut self,syscall_id:usize){
+  
+        self.syscall_times[self.current().unwrap().pid.0][syscall_id]+=1;
+    }
 }
 
 lazy_static! {
@@ -57,8 +84,12 @@ pub fn run_tasks() {
         let mut processor = PROCESSOR.exclusive_access();
         if let Some(task) = fetch_task() {
             let idle_task_cx_ptr = processor.get_idle_task_cx_ptr();
+            if processor.run_time[task.pid.0]==0{
+                processor.run_time[task.pid.0]=get_time_ms();
+            }
             // access coming task TCB exclusively
             let mut task_inner = task.inner_exclusive_access();
+            task_inner.stride+=BIG_STRIDE/task_inner.priority;
             let next_task_cx_ptr = &task_inner.task_cx as *const TaskContext;
             task_inner.task_status = TaskStatus::Running;
             // release coming task_inner manually
@@ -85,7 +116,18 @@ pub fn take_current_task() -> Option<Arc<TaskControlBlock>> {
 pub fn current_task() -> Option<Arc<TaskControlBlock>> {
     PROCESSOR.exclusive_access().current()
 }
-
+///find time
+pub fn current_run_time()-> usize {
+    PROCESSOR.exclusive_access().get_now()
+}
+///get count
+pub fn current_get_count()->[u32; MAX_SYSCALL_NUM] {
+    PROCESSOR.exclusive_access().get_count()
+}
+///update syscall count
+pub fn update_syscall_time(syscall_id:usize){
+    PROCESSOR.exclusive_access().update_syscall_time(syscall_id)
+}
 /// Get the current user token(addr of page table)
 pub fn current_user_token() -> usize {
     let task = current_task().unwrap();
