@@ -114,7 +114,7 @@ pub fn sys_linkat(old_name: *const u8, new_name: *const u8) -> isize {
     }
     let token = current_user_token();
     let path = translated_str(token, old_name);
-    let new_path = translated_str(token, old_name);
+    let new_path = translated_str(token, new_name);
     linkat(path.as_str(),new_path.as_str())
 }
 
