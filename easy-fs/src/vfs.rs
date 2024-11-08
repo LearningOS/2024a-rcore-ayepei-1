@@ -8,6 +8,7 @@ use alloc::vec::Vec;
 use spin::{Mutex, MutexGuard};
 /// Virtual filesystem layer over easy-fs
 pub struct Inode {
+    inode_id:u32,
     block_id: usize,
     block_offset: usize,
     fs: Arc<Mutex<EasyFileSystem>>,
@@ -17,6 +18,7 @@ pub struct Inode {
 impl Inode {
     /// Create a vfs inode
     pub fn new(
+        inode_id:u32,
         block_id: u32,
         block_offset: usize,
         fs: Arc<Mutex<EasyFileSystem>>,
@@ -27,10 +29,11 @@ impl Inode {
             block_offset,
             fs,
             block_device,
+            inode_id,
         }
     }
     /// Call a function over a disk inode to read it
-    fn read_disk_inode<V>(&self, f: impl FnOnce(&DiskInode) -> V) -> V {
+    pub fn read_disk_inode<V>(&self, f: impl FnOnce(&DiskInode) -> V) -> V {
         get_block_cache(self.block_id, Arc::clone(&self.block_device))
             .lock()
             .read(self.block_offset, f)
@@ -65,6 +68,7 @@ impl Inode {
             self.find_inode_id(name, disk_inode).map(|inode_id| {
                 let (block_id, block_offset) = fs.get_disk_inode_pos(inode_id);
                 Arc::new(Self::new(
+                    inode_id,
                     block_id,
                     block_offset,
                     self.fs.clone(),
@@ -131,6 +135,7 @@ impl Inode {
         block_cache_sync_all();
         // return inode
         Some(Arc::new(Self::new(
+            new_inode_id,
             block_id,
             block_offset,
             self.fs.clone(),
@@ -182,5 +187,85 @@ impl Inode {
             }
         });
         block_cache_sync_all();
+    }
+
+    ///linkat
+    pub fn linkat(&self,path:&str,new_path:&str)->isize{
+        let mut fs = self.fs.lock();
+        
+        let older_inode_id=self.read_disk_inode(|root_inode| {
+             self.find_inode_id(path, root_inode)
+        });
+        if older_inode_id.is_none(){
+            return -1;
+        }
+        //修改link
+        let (new_inode_block_id, new_inode_block_offset)
+            = fs.get_disk_inode_pos(older_inode_id.unwrap());
+        get_block_cache(
+            new_inode_block_id as usize,
+            Arc::clone(&self.block_device)
+        ).lock().modify(new_inode_block_offset, |new_inode: &mut DiskInode|
+            new_inode.link+=1
+        );
+
+        self.modify_disk_inode(|root_inode| {
+           // append file in the dirent
+            let file_count = (root_inode.size as usize) / DIRENT_SZ;
+            let new_size = (file_count + 1) * DIRENT_SZ;
+            // increase size
+            self.increase_size(new_size as u32, root_inode, &mut fs);
+            // write dirent
+            let dirent = DirEntry::new(new_path, older_inode_id.unwrap());
+            root_inode.write_at(
+                file_count * DIRENT_SZ,
+            dirent.as_bytes(),
+                &self.block_device,
+            );
+        });
+
+    
+        0
+    }
+    ///unlinkat
+    pub fn unlinkat(&self,path:&str)->isize{
+        let mut inode_id=0;
+
+        self.modify_disk_inode(|disk_inode| {
+            let file_count = (disk_inode.size as usize) / DIRENT_SZ;
+            
+            for i in 0..file_count {
+                let mut dirent = DirEntry::empty();
+                assert_eq!(
+                    disk_inode.read_at(i * DIRENT_SZ, dirent.as_bytes_mut(), &self.block_device,),
+                    DIRENT_SZ,
+                );
+                
+                if dirent.name()==path{
+                    inode_id=dirent.inode_id();  
+                    let mut temp=DirEntry::empty();
+                    disk_inode.write_at(i * DIRENT_SZ, temp.as_bytes_mut(), &self.block_device,);
+                }
+            }
+        });
+
+        let  fs = self.fs.lock();
+        //修改link
+        let (new_inode_block_id, new_inode_block_offset)
+            = fs.get_disk_inode_pos(inode_id);
+        get_block_cache(
+            new_inode_block_id as usize,
+            Arc::clone(&self.block_device)
+        ).lock().modify(new_inode_block_offset, |new_inode: &mut DiskInode|{
+            new_inode.link-=1;
+        }
+            
+        );
+       
+        0
+    }
+    ///getid
+    pub fn get_inode_id(&self)->u32{
+        self.inode_id
     }
 }

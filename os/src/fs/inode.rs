@@ -4,8 +4,17 @@
 //!
 //! `UPSafeCell<OSInodeInner>` -> `OSInode`: for static `ROOT_INODE`,we
 //! need to wrap `OSInodeInner` into `UPSafeCell`
-use super::File;
-use crate::drivers::BLOCK_DEVICE;
+
+
+
+
+use core::mem;
+
+use super::{File, Stat, StatMode};
+
+
+use crate::task::current_user_token;
+use crate::{drivers::BLOCK_DEVICE, mm::translated_byte_buffer};
 use crate::mm::UserBuffer;
 use crate::sync::UPSafeCell;
 use alloc::sync::Arc;
@@ -13,6 +22,7 @@ use alloc::vec::Vec;
 use bitflags::*;
 use easy_fs::{EasyFileSystem, Inode};
 use lazy_static::*;
+use easy_fs::layout::DiskInodeType;
 
 /// inode in memory
 /// A wrapper around a filesystem inode
@@ -52,6 +62,7 @@ impl OSInode {
         }
         v
     }
+
 }
 
 lazy_static! {
@@ -70,6 +81,16 @@ pub fn list_apps() {
     println!("**************/");
 }
 
+    /// linkat
+    pub fn linkat(path:&str,new_path:&str)->isize{
+        ROOT_INODE.linkat(path,new_path)
+
+    }
+
+    ///unlinkat
+    pub fn unlinkat(path:&str)->isize{
+        ROOT_INODE.unlinkat(path)
+    }
 bitflags! {
     ///  The flags argument to the open() system call is constructed by ORing together zero or more of the following values:
     pub struct OpenFlags: u32 {
@@ -154,5 +175,42 @@ impl File for OSInode {
             total_write_size += write_size;
         }
         total_write_size
+    }
+    fn stat(&self,st:*mut Stat) ->usize  {
+        let size_of_stat = mem::size_of::<Stat>();
+        let src =st  as *const u8;
+        let buffers = translated_byte_buffer(current_user_token(), src , size_of_stat);
+        let pad=[0u64;7];
+        let inner=self.inner.exclusive_access();
+        let mut info = Stat {
+            dev:0,
+            ino:inner.inode.get_inode_id() as u64,
+            mode:StatMode::NULL,
+            nlink:1,
+            pad,
+    };
+        inner.inode.read_disk_inode(|disk_inode|{
+            info.nlink=disk_inode.link;
+            if disk_inode.type_==DiskInodeType::File{
+                info.mode=StatMode::FILE;
+            }
+            else {
+                info.mode=StatMode::DIR;
+            }
+        });
+        
+        let  info_ptr=&info as *const _ as *const u8;
+        let mut  offset=0;
+        for buffer in buffers {
+            buffer.copy_from_slice(unsafe {
+                core::slice::from_raw_parts(
+                    info_ptr.add(offset),
+                    buffer.len()
+                )
+            });
+            offset+=buffer.len();
+        }
+        0
+        
     }
 }

@@ -66,6 +66,56 @@ impl MemorySet {
             None,
         );
     }
+     ///mmap匿名映射
+     #[allow(unused)]
+     pub fn get_mmap(&mut self,start: usize, len: usize, port: usize)->isize{
+         let sstart=VirtAddr::from(start).floor();
+         let eend=VirtAddr::from(start+len+((PAGE_SIZE-len)%PAGE_SIZE)).ceil();
+         for area in self.areas.iter(){
+             if sstart<= area.vpn_range.get_start()&&eend>=area.vpn_range.get_end() || sstart>= area.vpn_range.get_start()&&sstart<area.vpn_range.get_end() || eend> area.vpn_range.get_start()&&eend<=area.vpn_range.get_end(){
+                 return -1;
+             }
+         }
+         let mut permission=MapPermission::U;
+         if port%2==1{
+             permission=MapPermission::R|permission;
+         }
+         if port/2%2==1{
+             permission=MapPermission::W|permission;
+         }
+         if port/4%2==1{
+             permission=MapPermission::X|permission;
+         }
+         self.push(
+             MapArea::new(start.into(), (start+len+((PAGE_SIZE-len)%PAGE_SIZE)).into(), MapType::Framed, permission),
+             None,
+         );
+ 
+         0
+     }
+     ///解除mmap匿名映射
+     #[allow(unused)]
+     pub fn get_munmap(&mut self,start: usize, len: usize)->isize{
+         let sstart=VirtAddr::from(start).floor();
+         let eend=VirtAddr::from(start+len+((PAGE_SIZE-len)%PAGE_SIZE)).ceil();
+         let mut flag=0;
+         for area in self.areas.iter(){
+             if sstart>= area.vpn_range.get_start()&&eend<=area.vpn_range.get_end(){
+                 flag=1;
+                 break;
+             }
+         }
+         if flag==0{
+             return -1;
+         }
+         let mut b=MapArea::new(start.into(), (start+len+((PAGE_SIZE-len)%PAGE_SIZE)).into(), MapType::Framed, MapPermission::U);
+         b.unmap(&mut self.page_table);
+         if let Some(index) = self.areas.iter().position(|x| x.vpn_range ==b.vpn_range) {
+             self.areas.swap_remove(index); 
+         }
+         0
+     }
+
     /// remove a area
     pub fn remove_area_with_start_vpn(&mut self, start_vpn: VirtPageNum) {
         if let Some((idx, area)) = self
