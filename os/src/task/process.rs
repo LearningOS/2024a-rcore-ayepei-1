@@ -2,7 +2,7 @@
 
 use super::id::RecycleAllocator;
 use super::manager::insert_into_pid2process;
-use super::TaskControlBlock;
+use super:: TaskControlBlock;
 use super::{add_task, SignalFlags};
 use super::{pid_alloc, PidHandle};
 use crate::fs::{File, Stdin, Stdout};
@@ -11,7 +11,7 @@ use crate::sync::{Condvar, Mutex, Semaphore, UPSafeCell};
 use crate::trap::{trap_handler, TrapContext};
 use alloc::string::String;
 use alloc::sync::{Arc, Weak};
-use alloc::vec;
+use alloc:: vec;
 use alloc::vec::Vec;
 use core::cell::RefMut;
 
@@ -49,6 +49,9 @@ pub struct ProcessControlBlockInner {
     pub semaphore_list: Vec<Option<Arc<Semaphore>>>,
     /// condvar list
     pub condvar_list: Vec<Option<Arc<Condvar>>>,
+    /// enable_deadlock_detect
+    pub enable_deadlock_detect:bool,
+    
 }
 
 impl ProcessControlBlockInner {
@@ -119,6 +122,7 @@ impl ProcessControlBlock {
                     mutex_list: Vec::new(),
                     semaphore_list: Vec::new(),
                     condvar_list: Vec::new(),
+                    enable_deadlock_detect:false,
                 })
             },
         });
@@ -245,6 +249,7 @@ impl ProcessControlBlock {
                     mutex_list: Vec::new(),
                     semaphore_list: Vec::new(),
                     condvar_list: Vec::new(),
+                    enable_deadlock_detect:false,
                 })
             },
         });
@@ -282,4 +287,5 @@ impl ProcessControlBlock {
     pub fn getpid(&self) -> usize {
         self.pid.0
     }
+    
 }
